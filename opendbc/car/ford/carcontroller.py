@@ -10,6 +10,7 @@ from opendbc.sunnypilot.car.ford.bluepilot import fordcan_ext  # BluePilot (bp-f
 from opendbc.sunnypilot.car.ford.bluepilot.longitudinal_ext import LongitudinalExt  # BluePilot (bp-full)
 from opendbc.sunnypilot.car.ford.bluepilot.icbm import IcbmExt, drop_held_set_buttons  # BluePilot (bp-full)
 from opendbc.sunnypilot.car.ford.bluepilot.hud_ext import HudExt  # BluePilot (bp-full)
+from opendbc.sunnypilot.car.ford.bluepilot.wheel_alert_ext import WheelAlertExt  # wheel vibration for alerts
 
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -46,6 +47,7 @@ class CarController(CarControllerBase):
     self.bp_long = LongitudinalExt()  # BluePilot (bp-full)
     self.bp_icbm = IcbmExt()  # BluePilot (bp-full)
     self.bp_hud = HudExt(CP)  # BluePilot (bp-full)
+    self.bp_wheel_alert = WheelAlertExt()  # wheel vibration for alerts
 
     self.apply_curvature_last = 0
     self.anti_overshoot_curvature_last = 0
@@ -126,6 +128,7 @@ class CarController(CarControllerBase):
       can_sends.append(self.bp.step_lka(CC, hud_control))
     elif (self.frame % CarControllerParams.LKA_STEP) == 0:
       can_sends.append(fordcan.create_lka_msg(self.packer, self.CAN))
+    can_sends = self.bp_wheel_alert.update(CC, CC_SP, can_sends)  # wheel vibration for alerts, on the frame just added
 
     ### longitudinal control ###
     # send acc msg at 50Hz
@@ -173,7 +176,8 @@ class CarController(CarControllerBase):
 
     ### ui ###
     # BluePilot (bp-full): BP7's cluster display replaces upstream's UI block (sunnypilot/car/ford/bluepilot/hud_ext.py)
-    can_sends.extend(self.bp_hud.update(CC, CC_SP, CS, main_on, steer_alert, fcw_alert, self.packer, self.CAN, self.frame))
+    can_sends.extend(self.bp_hud.update(CC, CC_SP, CS, main_on, steer_alert, fcw_alert, self.packer, self.CAN, self.frame,
+                                        self.bp_wheel_alert.hands_off_level))
 
     new_actuators = actuators.as_builder()
     new_actuators.curvature = self.apply_curvature_last

@@ -100,7 +100,8 @@ def create_acc_ui_msg(packer, CAN: CanBus, CP, main_on: bool, enabled: bool, fcw
   return packer.make_can_msg("ACCDATA_3", CAN.main, values)
 
 
-def create_lkas_ui_msg(packer, CAN: CanBus, steer_alert: bool, hud_control, stock_values: dict):
+def create_lkas_ui_msg(packer, CAN: CanBus, steer_alert: bool, hud_control, stock_values: dict,
+                       hands_off_level: int | None = None):
   """Upstream's IPMA/LKAS cluster status (IPMA_Data) as BP7 sends it: each lane line on its own
   (departure, visible, else Suppress), whether or not openpilot is engaged.
 
@@ -133,6 +134,7 @@ def create_lkas_ui_msg(packer, CAN: CanBus, steer_alert: bool, hud_control, stoc
 
   values.update({
     "LaActvStats_D_Dsply": left + right,        # LKAS status (lane lines) [0|31]
-    "LaHandsOff_D_Dsply": 1 if steer_alert else 0,  # 0=HandsOn, 1=Level1 (w/o chime)
+    # 0=HandsOn, 1=Level1 (w/o chime), 2=Level2 (w/ chime); BP7 only uses 1, hands_off_level overrides it
+    "LaHandsOff_D_Dsply": hands_off_level if hands_off_level is not None else (1 if steer_alert else 0),
   })
   return packer.make_can_msg("IPMA_Data", CAN.main, values)

@@ -404,6 +404,18 @@ class TestFordSafetyBase(common.CarSafetyTest):
     self.safety.set_controls_allowed(0)
     self.assertFalse(self._tx(self._lkas_command_msg(1)))
 
+  def test_lane_departure_warning_request_allowed(self):
+    # the wheel vibration request (wheel_alert_ext) is a warning, not steering: allowed with or without controls,
+    # but never together with a lane keeping aid action
+    for allowed in (0, 1):
+      self.safety.set_controls_allowed(allowed)
+      for status in (1, 2, 4):
+        for intensity in (1, 2, 3):
+          values = {"LdwActvStats_D_Req": status, "LdwActvIntns_D_Req": intensity}
+          self.assertTrue(self._tx(self.packer.make_can_msg_safety("Lane_Assist_Data1", 0, values)))
+          values["LkaActvStats_D2_Req"] = 1
+          self.assertFalse(self._tx(self.packer.make_can_msg_safety("Lane_Assist_Data1", 0, values)))
+
   def test_acc_buttons(self):
     for allowed in (0, 1):
       self.safety.set_controls_allowed(allowed)

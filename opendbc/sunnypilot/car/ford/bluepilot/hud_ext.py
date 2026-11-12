@@ -21,17 +21,22 @@ class HudExt:
     self.main_on_last = False
     self.lkas_enabled_last = False
     self.steer_alert_last = False
+    self.hands_off_level_last = None
     self.lead_distance_bars_last = None
     self.send_bars_last = False
     self.send_bars_ts_last = 0
 
-  def update(self, CC, CC_SP, CS, main_on: bool, steer_alert: bool, fcw_alert: bool, packer, CAN, frame: int) -> list:
+  def update(self, CC, CC_SP, CS, main_on: bool, steer_alert: bool, fcw_alert: bool, packer, CAN, frame: int,
+             hands_off_level: int | None = None) -> list:
+    # hands_off_level: wheel_alert_ext's override of the hands-on-wheel message level, None for BP7's
     hud_control = CC.hudControl
     can_sends = []
 
-    send_ui = (self.main_on_last != main_on) or (self.lkas_enabled_last != CC.latActive) or (self.steer_alert_last != steer_alert)
+    send_ui = (self.main_on_last != main_on) or (self.lkas_enabled_last != CC.latActive) or (self.steer_alert_last != steer_alert) or \
+              (self.hands_off_level_last != hands_off_level)
     if (frame % CarControllerParams.LKAS_UI_STEP) == 0 or send_ui:
-      can_sends.append(fordcan_ext.create_lkas_ui_msg(packer, CAN, steer_alert, hud_control, CS.lkas_status_stock_values))
+      can_sends.append(fordcan_ext.create_lkas_ui_msg(packer, CAN, steer_alert, hud_control, CS.lkas_status_stock_values,
+                                                      hands_off_level))
 
     send_bars = False
     if hud_control.leadDistanceBars != self.lead_distance_bars_last:
@@ -53,6 +58,7 @@ class HudExt:
     self.main_on_last = main_on
     self.lkas_enabled_last = CC.latActive
     self.steer_alert_last = steer_alert
+    self.hands_off_level_last = hands_off_level
     self.lead_distance_bars_last = hud_control.leadDistanceBars
     self.send_bars_last = send_bars
     return can_sends
