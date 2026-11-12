@@ -14,8 +14,12 @@ The vibration comes in bursts with a rest in between, so a long alert doesn't bu
 The lane keeping aid field (LkaActvStats_D2_Req, byte 0 bits 7-5) is never written: it stays zero, which is all
 the panda lets through. BluePilot lateral's own bits in this frame (bytes 4-6) are kept as they are.
 
+Between bursts the frame says "idle, intensity high" instead of upstream's "idle, intensity none". On a 2023
+Expedition a burst sent from upstream's baseline did nothing: the PSCM reported the lane departure warning as
+suppressed (Lane_Assist_Data3_FD1 LaActAvail_D_Actl 0 or 2) the whole time, and intensity none may be why. This
+is a probe: whether the PSCM then reports the warning as available is read from the drive log.
+
 Off unless the host publishes send_wheel_vibration_alerts in CarControlSP.params.
-Not yet confirmed on a truck that the PSCM vibrates on a request that doesn't come from the camera.
 """
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.can_definitions import CanData
@@ -42,6 +46,7 @@ NONE, DEPARTURE, TAKE_CONTROL, CRITICAL = 0, 1, 2, 3
 BURST_S = {DEPARTURE: 1.0, TAKE_CONTROL: 1.0, CRITICAL: 2.0}
 REST_S = {DEPARTURE: 2.0, TAKE_CONTROL: 3.0, CRITICAL: 1.0}
 INTENSITY = {DEPARTURE: INTENSITY_MEDIUM, TAKE_CONTROL: INTENSITY_MEDIUM, CRITICAL: INTENSITY_HIGH}
+BASELINE_INTENSITY = INTENSITY_HIGH  # sent with LDW_IDLE between bursts while the setting is on
 
 
 def wanted(hud_control) -> tuple[int, int]:
@@ -97,6 +102,5 @@ class WheelAlertExt:
       if self.rest_frames == 0:
         self.level = NONE
 
-    if not self.vibrating:
-      return can_sends
-    return [set_ldw_request(m, self.status, INTENSITY[self.level]) if m[0] == LANE_ASSIST_DATA1 else m for m in can_sends]
+    status, intensity = (self.status, INTENSITY[self.level]) if self.vibrating else (LDW_IDLE, BASELINE_INTENSITY)
+    return [set_ldw_request(m, status, intensity) if m[0] == LANE_ASSIST_DATA1 else m for m in can_sends]

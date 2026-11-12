@@ -409,7 +409,7 @@ class TestFordSafetyBase(common.CarSafetyTest):
     # but never together with a lane keeping aid action
     for allowed in (0, 1):
       self.safety.set_controls_allowed(allowed)
-      for status in (1, 2, 4):
+      for status in (0, 1, 2, 4):  # 0: idle with an intensity, the baseline between bursts
         for intensity in (1, 2, 3):
           values = {"LdwActvStats_D_Req": status, "LdwActvIntns_D_Req": intensity}
           self.assertTrue(self._tx(self.packer.make_can_msg_safety("Lane_Assist_Data1", 0, values)))

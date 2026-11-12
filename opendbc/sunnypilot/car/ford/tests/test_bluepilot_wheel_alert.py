@@ -16,6 +16,7 @@ AudibleAlert = structs.CarControl.HUDControl.AudibleAlert
 DBC = "ford_lincoln_base_pt"
 CAN = NS(main=0, camera=2)
 LKA, LKAS_UI = 0x3CA, 0x3D8
+REST = wa.BASELINE_INTENSITY  # byte 0 between bursts while the setting is on: idle, with the baseline intensity
 ON = [NS(key="send_wheel_vibration_alerts", value=b"1")]
 
 
@@ -102,12 +103,16 @@ class TestWheelAlertExt(unittest.TestCase):
     self.assertEqual(set(self.run_frames(ext, 300, params=[NS(key="send_wheel_vibration_alerts", value=b"0")], **CRITICAL)), {0})
 
   def test_no_alert_no_vibration(self):
-    self.assertEqual(set(self.run_frames(WheelAlertExt(), 500)), {0})
+    self.assertEqual(set(self.run_frames(WheelAlertExt(), 500)), {REST})
+
+  def test_baseline_is_idle_with_an_intensity(self):
+    vl = decode(WheelAlertExt().update(NS(hudControl=hud()), NS(params=ON), [lka_frame()])[0])
+    self.assertEqual((vl["LdwActvStats_D_Req"], vl["LdwActvIntns_D_Req"], vl["LkaActvStats_D2_Req"]), (0, 3, 0))
 
   def test_take_control_is_one_second_on_three_off(self):
     b = self.run_frames(WheelAlertExt(), 900, **TAKE_CONTROL)
     on = (wa.LDW_WARNING_LEFT << 2) | wa.INTENSITY_MEDIUM
-    self.assertEqual(set(b), {0, on})
+    self.assertEqual(set(b), {REST, on})
     self.assertEqual([i for i in range(1, 900) if b[i] != b[i - 1]], [100, 401, 501, 802])
     self.assertEqual(b[0], on)
 
@@ -122,8 +127,8 @@ class TestWheelAlertExt(unittest.TestCase):
   def test_a_short_alert_still_gets_its_full_burst_then_stops(self):
     ext = WheelAlertExt()
     b = self.run_frames(ext, 20, **TAKE_CONTROL) + self.run_frames(ext, 600)
-    self.assertEqual(sum(x != 0 for x in b), 100)
-    self.assertEqual(set(b[100:]), {0})
+    self.assertEqual(sum(x != REST for x in b), 100)
+    self.assertEqual(set(b[100:]), {REST})
 
   def test_critical_interrupts_a_take_control_rest(self):
     ext = WheelAlertExt()
@@ -135,7 +140,7 @@ class TestWheelAlertExt(unittest.TestCase):
   def test_lane_departure_does_not_interrupt_a_rest(self):
     ext = WheelAlertExt()
     self.run_frames(ext, 150, **TAKE_CONTROL)
-    self.assertEqual(set(self.run_frames(ext, 50, rightLaneDepart=True)), {0})
+    self.assertEqual(set(self.run_frames(ext, 50, rightLaneDepart=True)), {REST})
 
   def test_lane_departure_vibrates_on_its_side(self):
     b = self.run_frames(WheelAlertExt(), 10, rightLaneDepart=True)
@@ -146,7 +151,7 @@ class TestWheelAlertExt(unittest.TestCase):
     other = CanData(0x3D8, bytes(8), 0)
     sends = ext.update(NS(hudControl=hud(**CRITICAL)), NS(params=ON), [other, lka_frame()])
     self.assertEqual(sends[0], other)
-    self.assertNotEqual(sends[1][1][0], 0)
+    self.assertNotIn(sends[1][1][0], (0, REST))
 
   def test_switching_off_stops_at_once(self):
     ext = WheelAlertExt()
@@ -202,7 +207,7 @@ class TestCarController(unittest.TestCase):
     self.assertTrue(all(m[2] == CAN.main for m in lka))
     self.assertEqual({m[1][0] >> 5 for m in lka}, {0})
     self.assertEqual({m[1][0] for m in lka[:33]}, {(wa.LDW_WARNING_LEFT << 2) | wa.INTENSITY_MEDIUM})
-    self.assertEqual({m[1][0] for m in lka[35:]}, {0})
+    self.assertEqual({m[1][0] for m in lka[35:]}, {REST})
 
   def test_setting_off_sends_upstreams_frame(self):
     self.assertEqual({m[1][0] for m in self.frames([], visualAlert=VisualAlert.steerRequired)}, {0})
