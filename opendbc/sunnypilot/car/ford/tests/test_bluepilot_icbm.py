@@ -7,7 +7,8 @@ from opendbc.can import CANPacker, CANParser
 from opendbc.car import gen_empty_fingerprint, structs
 from opendbc.car.ford.interface import CarInterface
 from opendbc.car.ford.values import CAR
-from opendbc.sunnypilot.car.ford.bluepilot.icbm import IcbmExt
+from opendbc.car.ford import fordcan
+from opendbc.sunnypilot.car.ford.bluepilot.icbm import IcbmExt, drop_held_set_buttons
 
 SendButtonState = structs.IntelligentCruiseButtonManagement.SendButtonState
 DBC = "ford_lincoln_base_pt"
@@ -64,6 +65,35 @@ class TestIcbmExt(unittest.TestCase):
     msgs = self.sends(SendButtonState.increase, 6, stock)
     self.assertEqual(decode(msgs[0])["TurnLghtSwtch_D_Stat"], 1)
     self.assertEqual(stock, before)  # the car state's dict is not written to
+
+  def test_not_sent_when_not_allowed(self):
+    # engaged on both sides with no cancel/resume going out is the caller's condition
+    msgs = self.icbm.update(cc_sp(SendButtonState.increase), NS(buttons_stock_values=stock_buttons()), self.packer, CAN, 6, allowed=False)
+    self.assertEqual(msgs, [])
+
+  def test_only_the_requested_press_goes_out_while_the_driver_holds_the_other(self):
+    for m in self.sends(SendButtonState.increase, 6, stock_buttons(CcAslButtnSetDecPress=1)):
+      self.assertEqual((decode(m)["CcAslButtnSetIncPress"], decode(m)["CcAslButtnSetDecPress"]), (1, 0))
+
+
+class TestDropHeldSetButtons(unittest.TestCase):
+  def setUp(self):
+    self.packer = CANPacker(DBC)
+
+  def test_cancel_resume_tja_frames_lose_a_held_set_button_and_nothing_else(self):
+    for held in ({}, {"CcAslButtnSetIncPress": 1}, {"CcAslButtnSetDecPress": 1}, {"CcAslButtnSetIncPress": 1, "CcAslButtnSetDecPress": 1}):
+      for kwargs, pressed in (({"cancel": True}, "CcAslButtnCnclPress"), ({"resume": True}, "CcAsllButtnResPress"),
+                              ({"tja_toggle": True}, "TjaButtnOnOffPress")):
+        with self.subTest(held=held, pressed=pressed):
+          stock = stock_buttons(TurnLghtSwtch_D_Stat=1, **held)
+          clean = decode(fordcan.create_button_msg(self.packer, 0, {**stock, "CcAslButtnSetIncPress": 0, "CcAslButtnSetDecPress": 0}, **kwargs))
+          out = decode(drop_held_set_buttons([fordcan.create_button_msg(self.packer, 0, stock, **kwargs)])[0])
+          self.assertEqual(out, clean)
+          self.assertEqual((out[pressed], out["CcAslButtnSetIncPress"], out["CcAslButtnSetDecPress"], out["TurnLghtSwtch_D_Stat"]), (1, 0, 0, 1))
+
+  def test_other_messages_are_untouched(self):
+    other = [(0x186, b"\xff" * 8, 0), (0x3CA, b"\xff" * 8, 0)]
+    self.assertEqual(drop_held_set_buttons(other), other)
 
 
 class TestFordIcbmAvailable(unittest.TestCase):
