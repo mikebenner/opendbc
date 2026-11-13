@@ -19,7 +19,16 @@ from opendbc.sunnypilot.car.ford.bluepilot.published import published_bool
 BPX_LONG_PARAMS = {
   "disable_BP_long_UI": False,
   "disable_downhill_comp_UI": False,
+  "FordAccSendPrediction": False,
+  "FordAccSendTargetSpeed": False,
 }
+
+# ACCDATA's predicted-acceleration and target-speed fields. Upstream and BP7 send constants (-5 m/s^2,
+# V_CRUISE_MAX). Ford's own ACC sends its acceleration request as the prediction and a target speed
+# about 1-2 s ahead of the car; a 2023 Expedition under Ford's ACC moves its PCM cruise mode from
+# Keeping_Speed to Resuming_Low on a rolling relaunch, and with the constants it does not (and holds
+# first gear to 4,000-5,300 rpm). Each field is sent Ford's way only when its setting is on.
+TARGET_SPEED_LOOKAHEAD = 2.0  # s
 
 MAX_URBAN_SPEED_MPH = 45.0
 FOLLOWING_ACCEL_ROC = 0.002  # max accel change per step in following mode
@@ -29,6 +38,23 @@ BRAKE_ACTUATE_TARGET = -0.14
 BRAKE_ACTUATE_RELEASE = -0.06
 PRECHARGE_ACTUATE_TARGET = -0.12
 PRECHARGE_ACTUATE_RELEASE = -0.06
+
+
+def preview_signals(CC_SP, long_active: bool, gas: float, accel: float, v_ego: float, v_cruise_max_kph: float):
+  """(AccPrpl_A_Pred, AccVeh_V_Trg in kph) for the ACCDATA message, from the gas and accel already
+  chosen for it. With both settings off: upstream's constants."""
+  pred = CarControllerParams.INACTIVE_GAS
+  v_trg_kph = float(v_cruise_max_kph)
+  if not long_active:
+    return pred, v_trg_kph
+  propelling = gas > CarControllerParams.INACTIVE_GAS
+  if published_bool(CC_SP, "FordAccSendPrediction", BPX_LONG_PARAMS) and propelling:
+    # the same value as AccPrpl_A_Rq: the panda holds both fields to the same limits
+    pred = gas
+  if published_bool(CC_SP, "FordAccSendTargetSpeed", BPX_LONG_PARAMS):
+    request = gas if propelling else min(accel, 0.0)
+    v_trg_kph = float(np.clip((v_ego + request * TARGET_SPEED_LOOKAHEAD) * 3.6, 0.0, v_cruise_max_kph))
+  return pred, v_trg_kph
 
 
 class LongitudinalExt:

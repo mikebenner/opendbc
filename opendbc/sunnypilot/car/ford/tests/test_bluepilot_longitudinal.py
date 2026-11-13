@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace as NS
 
 from opendbc.car.ford.values import CarControllerParams
-from opendbc.sunnypilot.car.ford.bluepilot.longitudinal_ext import LongitudinalExt
+from opendbc.sunnypilot.car.ford.bluepilot.longitudinal_ext import LongitudinalExt, preview_signals
 
 MPH = 0.44704
 
@@ -85,6 +85,60 @@ class TestLongitudinalExt(unittest.TestCase):
     _, gas, brake, _ = self.run_at(40, -1.0, 0.4)
     self.assertTrue(brake)
     self.assertEqual(gas, CarControllerParams.INACTIVE_GAS)
+
+
+class TestPreviewSignals(unittest.TestCase):
+  """ACCDATA's predicted-acceleration and target-speed fields (preview_signals)."""
+  INACTIVE = CarControllerParams.INACTIVE_GAS
+  VMAX = 145.0
+
+  def sig(self, gas, accel, mph, long_active=True, **params):
+    return preview_signals(cc_sp(**params), long_active, gas, accel, mph * MPH, self.VMAX)
+
+  def test_off_is_upstream_constants(self):
+    for gas, accel, mph in ((1.5, 1.5, 5), (self.INACTIVE, -2.0, 40), (0.2, 0.2, 70)):
+      self.assertEqual(self.sig(gas, accel, mph), (self.INACTIVE, self.VMAX))
+
+  def test_not_active_is_upstream_constants(self):
+    self.assertEqual(self.sig(1.0, 1.0, 20, long_active=False, FordAccSendPrediction=b"1", FordAccSendTargetSpeed=b"1"),
+                     (self.INACTIVE, self.VMAX))
+
+  def test_prediction_is_the_gas_request(self):
+    pred, v_trg = self.sig(1.5, 1.5, 5, FordAccSendPrediction=b"1")
+    self.assertEqual(pred, 1.5)
+    self.assertEqual(v_trg, self.VMAX)  # the other field is untouched
+
+  def test_prediction_inactive_while_braking_or_coasting(self):
+    pred, _ = self.sig(self.INACTIVE, -2.0, 40, FordAccSendPrediction=b"1")
+    self.assertEqual(pred, self.INACTIVE)
+
+  def test_prediction_stays_inside_the_panda_gas_limits(self):
+    for gas in (CarControllerParams.MIN_GAS, 0.0, 1.0, CarControllerParams.ACCEL_MAX):
+      pred, _ = self.sig(gas, gas, 10, FordAccSendPrediction=b"1")
+      self.assertTrue(-0.5 <= pred <= 2.0)
+
+  def test_target_speed_leads_the_car_when_accelerating(self):
+    pred, v_trg = self.sig(1.5, 1.5, 5, FordAccSendTargetSpeed=b"1")
+    self.assertEqual(pred, self.INACTIVE)
+    self.assertAlmostEqual(v_trg, (5 * MPH + 1.5 * 2.0) * 3.6, places=4)
+
+  def test_target_speed_is_the_car_speed_when_steady(self):
+    _, v_trg = self.sig(0.0, 0.0, 60, FordAccSendTargetSpeed=b"1")
+    self.assertAlmostEqual(v_trg, 60 * MPH * 3.6, places=4)
+
+  def test_target_speed_trails_the_car_when_braking_and_stops_at_zero(self):
+    _, v_trg = self.sig(self.INACTIVE, -2.0, 40, FordAccSendTargetSpeed=b"1")
+    self.assertAlmostEqual(v_trg, (40 * MPH - 2.0 * 2.0) * 3.6, places=4)
+    _, v_trg = self.sig(self.INACTIVE, -2.0, 2, FordAccSendTargetSpeed=b"1")
+    self.assertEqual(v_trg, 0.0)
+
+  def test_target_speed_ignores_a_positive_brake_path_accel_while_gas_is_inactive(self):
+    _, v_trg = self.sig(self.INACTIVE, 0.2, 30, FordAccSendTargetSpeed=b"1")
+    self.assertAlmostEqual(v_trg, 30 * MPH * 3.6, places=4)
+
+  def test_target_speed_never_exceeds_the_maximum(self):
+    _, v_trg = self.sig(2.0, 2.0, 95, FordAccSendTargetSpeed=b"1")
+    self.assertEqual(v_trg, self.VMAX)
 
 
 if __name__ == '__main__':
