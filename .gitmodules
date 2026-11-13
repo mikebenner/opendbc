@@ -1,4 +1,4 @@
 [submodule "opendbc/bluepilot_lateral"]
 	path = opendbc/bluepilot_lateral
-	url = https://github.com/BluePilotDev/bluepilot-lateral.git
-	branch = release
+	url = https://github.com/mikebenner/bluepilot-lateral.git
+	branch = expedition-speed-floor
